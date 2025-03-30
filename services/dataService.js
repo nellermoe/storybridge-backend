@@ -10,6 +10,11 @@ class DataService {
    * @returns {Promise<object>} - Summary of the import
    */
   async initializeWithWotData(characters) {
+    if (!characters || !Array.isArray(characters)) {
+      logger.error('Invalid or missing characters data for initialization');
+      throw new Error('Invalid characters data');
+    }
+
     logger.info(`Starting database initialization with ${characters.length} characters`);
     
     const summary = {
@@ -21,53 +26,73 @@ class DataService {
     try {
       // First, create all character nodes
       for (const character of characters) {
+        if (!character || !character.name) {
+          logger.warn('Skipping invalid character without name');
+          continue;
+        }
+
         // Generate a unique ID for each character
         const userId = uuidv4();
         
-        await neo4jService.createUser({
-          id: userId,
-          name: character.name,
-          bio: character.description || `A character from the Wheel of Time series`,
-          // Store original data for reference
-          affiliation: character.affiliation,
-          nationality: character.nationality,
-          gender: character.gender
-        });
-        
-        // Add character ID for later reference
-        character.id = userId;
-        summary.characters++;
+        try {
+          await neo4jService.createUser({
+            id: userId,
+            name: character.name,
+            bio: character.description || `A character from the Wheel of Time series`,
+            // Store original data for reference
+            affiliation: character.affiliation || 'Unknown',
+            nationality: character.nationality || 'Unknown',
+            gender: character.gender || 'Unknown'
+          });
+          
+          // Add character ID for later reference
+          character.id = userId;
+          summary.characters++;
+        } catch (error) {
+          logger.error(`Error creating user ${character.name}: ${error.message}`);
+          // Continue with other characters instead of failing the entire process
+        }
       }
       
       logger.info(`Created ${summary.characters} character nodes`);
       
       // Create relationships based on character associations
       for (const character of characters) {
-        // Skip if no associations
-        if (!character.associations || character.associations.length === 0) {
+        // Skip if no associations or no ID (meaning user creation failed)
+        if (!character.id || !character.associations || !Array.isArray(character.associations) || character.associations.length === 0) {
           continue;
         }
         
         // For each associated character, create a relationship
         for (const association of character.associations) {
+          if (!association) {
+            continue;
+          }
+
           // Find the associated character in our processed list
           const associatedCharacter = characters.find(c => 
+            c && c.name && c.id && 
             c.name.toLowerCase() === association.toLowerCase()
           );
           
-          // Skip if character not found
-          if (!associatedCharacter) {
+          // Skip if character not found or has no ID
+          if (!associatedCharacter || !associatedCharacter.id) {
             continue;
           }
           
-          // Create relationship
-          await neo4jService.createConnection(
-            character.id, 
-            associatedCharacter.id,
-            'KNOWS'
-          );
-          
-          summary.relationships++;
+          try {
+            // Create relationship
+            await neo4jService.createConnection(
+              character.id, 
+              associatedCharacter.id,
+              'KNOWS'
+            );
+            
+            summary.relationships++;
+          } catch (error) {
+            logger.error(`Error creating relationship between ${character.name} and ${association}: ${error.message}`);
+            // Continue with other relationships
+          }
         }
       }
       
@@ -84,38 +109,62 @@ class DataService {
       
       // Select main characters to be authors
       const mainCharacters = characters.filter(c => 
-        c.name === "Rand al'Thor" || 
-        c.name === "Matrim Cauthon" || 
-        c.name === "Perrin Aybara" ||
-        c.name === "Egwene al'Vere" ||
-        c.name === "Nynaeve al'Meara"
+        c && c.id && c.name && (
+          c.name === "Rand al'Thor" || 
+          c.name === "Matrim Cauthon" || 
+          c.name === "Perrin Aybara" ||
+          c.name === "Egwene al'Vere" ||
+          c.name === "Nynaeve al'Meara"
+        )
       );
       
       // Fallback if we couldn't find main characters
-      const authors = mainCharacters.length ? mainCharacters : characters.slice(0, 5);
+      const authors = mainCharacters.length ? mainCharacters : characters.filter(c => c && c.id).slice(0, 5);
       
-      // Create stories
-      for (let i = 0; i < storyTitles.length; i++) {
-        const author = authors[i % authors.length];
-        
-        const storyId = uuidv4();
-        await neo4jService.createStory({
-          id: storyId,
-          title: storyTitles[i],
-          content: `This is a sample story about the adventures in the world of the Wheel of Time.`,
-          authorId: author.id
-        });
-        
-        summary.stories++;
-        
-        // Add some story shares
-        const recipients = characters
-          .filter(c => c.id !== author.id)
-          .sort(() => 0.5 - Math.random()) // Shuffle
-          .slice(0, 5); // Take 5 random characters
-        
-        for (const recipient of recipients) {
-          await neo4jService.shareStory(storyId, author.id, recipient.id);
+      // Check if we have any authors
+      if (authors.length === 0) {
+        logger.warn('No valid authors found for stories, skipping story creation');
+      } else {
+        // Create stories
+        for (let i = 0; i < storyTitles.length; i++) {
+          const author = authors[i % authors.length];
+          
+          if (!author || !author.id) {
+            logger.warn(`No valid author for story "${storyTitles[i]}", skipping`);
+            continue;
+          }
+          
+          try {
+            const storyId = uuidv4();
+            await neo4jService.createStory({
+              id: storyId,
+              title: storyTitles[i],
+              content: `This is a sample story about the adventures in the world of the Wheel of Time.`,
+              authorId: author.id
+            });
+            
+            summary.stories++;
+            
+            // Add some story shares
+            const recipients = characters
+              .filter(c => c && c.id && c.id !== author.id)
+              .sort(() => 0.5 - Math.random()) // Shuffle
+              .slice(0, 5); // Take 5 random characters
+            
+            for (const recipient of recipients) {
+              if (recipient && recipient.id) {
+                try {
+                  await neo4jService.shareStory(storyId, author.id, recipient.id);
+                } catch (error) {
+                  logger.error(`Error sharing story ${storyId} from ${author.name} to ${recipient.name}: ${error.message}`);
+                  // Continue with other recipients
+                }
+              }
+            }
+          } catch (error) {
+            logger.error(`Error creating story "${storyTitles[i]}": ${error.message}`);
+            // Continue with other stories
+          }
         }
       }
       
@@ -135,6 +184,11 @@ class DataService {
    * @returns {object} - Formatted network data
    */
   formatNetworkForD3(data) {
+    // If data is missing, return empty structure
+    if (!data) {
+      return { nodes: [], links: [] };
+    }
+    
     // If already in the right format, return as is
     if (data.nodes && data.links) {
       return data;
@@ -146,35 +200,48 @@ class DataService {
     const nodeMap = new Map();
     
     // Process paths
-    if (data.paths) {
+    if (data.paths && Array.isArray(data.paths)) {
       data.paths.forEach(path => {
+        if (!path || !path.segments || !Array.isArray(path.segments)) {
+          return; // Skip invalid path
+        }
+        
         path.segments.forEach(segment => {
+          if (!segment || !segment.start || !segment.end || !segment.relationship) {
+            return; // Skip invalid segment
+          }
+          
+          // Ensure IDs exist
+          const startId = segment.start.id || `node-${Math.random().toString(36).substr(2, 9)}`;
+          const endId = segment.end.id || `node-${Math.random().toString(36).substr(2, 9)}`;
+          
           // Add start node if not already in the map
-          if (!nodeMap.has(segment.start.id)) {
-            nodeMap.set(segment.start.id, {
-              id: segment.start.id,
-              name: segment.start.name,
-              group: segment.start.labels[0],
+          if (!nodeMap.has(startId)) {
+            nodeMap.set(startId, {
+              id: startId,
+              name: segment.start.name || 'Unknown',
+              group: segment.start.labels && Array.isArray(segment.start.labels) ? segment.start.labels[0] : 'Unknown',
               ...segment.start
             });
           }
           
           // Add end node if not already in the map
-          if (!nodeMap.has(segment.end.id)) {
-            nodeMap.set(segment.end.id, {
-              id: segment.end.id,
-              name: segment.end.name,
-              group: segment.end.labels[0],
+          if (!nodeMap.has(endId)) {
+            nodeMap.set(endId, {
+              id: endId,
+              name: segment.end.name || 'Unknown',
+              group: segment.end.labels && Array.isArray(segment.end.labels) ? segment.end.labels[0] : 'Unknown',
               ...segment.end
             });
           }
           
           // Add relationship
+          const relId = segment.relationship.id || `rel-${Math.random().toString(36).substr(2, 9)}`;
           links.push({
-            source: segment.start.id,
-            target: segment.end.id,
-            type: segment.relationship.type,
-            id: segment.relationship.id,
+            source: startId,
+            target: endId,
+            type: segment.relationship.type || 'Unknown',
+            id: relId,
             ...segment.relationship
           });
         });
@@ -201,43 +268,52 @@ class DataService {
       return { nodes: [], links: [], length: 0 };
     }
     
-    const segments = pathData.path.segments;
+    const segments = pathData.path.segments || [];
     const nodes = [];
     const links = [];
     const nodeMap = new Map();
     
     // Process each segment in the path
     segments.forEach(segment => {
+      if (!segment || !segment.start || !segment.end || !segment.relationship) {
+        return; // Skip invalid segment
+      }
+      
+      // Ensure IDs exist
+      const startId = segment.start.id || `node-${Math.random().toString(36).substr(2, 9)}`;
+      const endId = segment.end.id || `node-${Math.random().toString(36).substr(2, 9)}`;
+      
       // Add start node if not already in the map
-      if (!nodeMap.has(segment.start.id)) {
+      if (!nodeMap.has(startId)) {
         const startNode = {
-          id: segment.start.id,
-          name: segment.start.name,
-          group: segment.start.labels[0],
+          id: startId,
+          name: segment.start.name || 'Unknown',
+          group: segment.start.labels && Array.isArray(segment.start.labels) ? segment.start.labels[0] : 'Unknown',
           ...segment.start
         };
         nodes.push(startNode);
-        nodeMap.set(segment.start.id, startNode);
+        nodeMap.set(startId, startNode);
       }
       
       // Add end node if not already in the map
-      if (!nodeMap.has(segment.end.id)) {
+      if (!nodeMap.has(endId)) {
         const endNode = {
-          id: segment.end.id,
-          name: segment.end.name,
-          group: segment.end.labels[0],
+          id: endId,
+          name: segment.end.name || 'Unknown',
+          group: segment.end.labels && Array.isArray(segment.end.labels) ? segment.end.labels[0] : 'Unknown',
           ...segment.end
         };
         nodes.push(endNode);
-        nodeMap.set(segment.end.id, endNode);
+        nodeMap.set(endId, endNode);
       }
       
       // Add relationship
+      const relId = segment.relationship.id || `rel-${Math.random().toString(36).substr(2, 9)}`;
       links.push({
-        source: segment.start.id,
-        target: segment.end.id,
-        type: segment.relationship.type,
-        id: segment.relationship.id,
+        source: startId,
+        target: endId,
+        type: segment.relationship.type || 'Unknown',
+        id: relId,
         ...segment.relationship
       });
     });
@@ -245,7 +321,7 @@ class DataService {
     return {
       nodes,
       links,
-      length: pathData.pathLength || segments.length
+      length: pathData.pathLength || (segments ? segments.length : 0)
     };
   }
 
