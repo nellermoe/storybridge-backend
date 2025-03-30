@@ -213,15 +213,19 @@ class Neo4jService {
    * @returns {Promise<array>} - The list of stories
    */
   async getStories(skip = 0, limit = 50) {
+    // Convert parameters to integers
+    const intSkip = parseInt(skip) || 0;
+    const intLimit = parseInt(limit) || 50;
+    
     const query = `
       MATCH (s:Story)<-[:AUTHORED]-(author:User)
       RETURN s, author
       ORDER BY s.createdAt DESC
-      SKIP $skip
-      LIMIT $limit
+      SKIP toInteger($skip)
+      LIMIT toInteger($limit)
     `;
     
-    return this.executeQuery(query, { skip: parseInt(skip), limit: parseInt(limit) });
+    return this.executeQuery(query, { skip: intSkip, limit: intLimit });
   }
 
   /**
