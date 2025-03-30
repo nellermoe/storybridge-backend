@@ -46,14 +46,15 @@ const getPath = async (req, res, next) => {
       pathData = await neo4jService.findShortestPath(source, target);
     } else {
       // It's likely a name, search for the characters first
+      // Use a case-insensitive query with the LOWER function
       const sourceNode = await neo4jService.executeQuery(
-        'MATCH (u:User {name: $name}) RETURN u',
+        'MATCH (u:User) WHERE LOWER(u.name) = LOWER($name) RETURN u',
         { name: source },
         true
       );
       
       const targetNode = await neo4jService.executeQuery(
-        'MATCH (u:User {name: $name}) RETURN u',
+        'MATCH (u:User) WHERE LOWER(u.name) = LOWER($name) RETURN u',
         { name: target },
         true
       );
