@@ -235,18 +235,18 @@ class Neo4jService {
    * @returns {Promise<object>} - The network data
    */
   async getNetworkData(limit = 100) {
-    // Ensure limit is a positive integer
-    const limitInt = Math.max(0, Math.floor(Number(limit)));
+    // Convert limit to a proper integer
+    const intLimit = parseInt(limit);
     
     const query = `
       MATCH (u:User)
-      WITH u LIMIT $limit
+      WITH u LIMIT toInteger($limit)
       OPTIONAL MATCH (u)-[r]-(related:User)
       WHERE id(related) < id(u) // Avoid duplicate relationships
       RETURN COLLECT(DISTINCT u) AS nodes, COLLECT(DISTINCT r) AS relationships
     `;
     
-    const result = await this.executeQuery(query, { limit: limitInt }, true);
+    const result = await this.executeQuery(query, { limit: intLimit }, true);
     
     if (!result) {
       return { nodes: [], links: [] };
