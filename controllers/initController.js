@@ -51,8 +51,8 @@ const getDatabaseStatus = async (req, res, next) => {
       RETURN 
         count(n) AS nodeCount,
         count(()-->()) AS relationshipCount,
-        count((u:User)) AS userCount,
-        count((s:Story)) AS storyCount
+        count((:User)) AS userCount,
+        count((:Story)) AS storyCount
     `, {}, true);
     
     res.json({
