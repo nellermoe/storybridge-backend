@@ -16,7 +16,17 @@ class Neo4jService {
     try {
       logger.debug(`Executing query: ${query}`, { params });
       
-      const result = await session.run(query, params);
+      // Convert any number parameters to integers if they're used for LIMIT
+      const processedParams = {};
+      for (const key in params) {
+        if (key === 'limit' || key.includes('limit') || key.includes('skip')) {
+          processedParams[key] = parseInt(params[key]) || 0;
+        } else {
+          processedParams[key] = params[key];
+        }
+      }
+      
+      const result = await session.run(query, processedParams);
       
       // Process the results
       const records = result.records.map(record => {
@@ -27,64 +37,66 @@ class Neo4jService {
           const value = record.get(key);
           
           // Handle Neo4j nodes
-          if (value && value.constructor.name === 'Node') {
+          if (value && value.constructor && value.constructor.name === 'Node') {
             processedRecord[key] = {
               ...value.properties,
-              id: value.identity.toString(),
-              labels: value.labels
+              id: value.identity ? value.identity.toString() : `node-${Math.random().toString(36).substring(2)}`,
+              labels: value.labels || []
             };
           } 
           // Handle Neo4j relationships
-          else if (value && value.constructor.name === 'Relationship') {
+          else if (value && value.constructor && value.constructor.name === 'Relationship') {
             processedRecord[key] = {
               ...value.properties,
-              id: value.identity.toString(),
-              type: value.type,
-              startNodeId: value.startNodeIdentity.toString(),
-              endNodeId: value.endNodeIdentity.toString()
+              id: value.identity ? value.identity.toString() : `rel-${Math.random().toString(36).substring(2)}`,
+              type: value.type || 'UNKNOWN',
+              startNodeId: value.startNodeIdentity ? value.startNodeIdentity.toString() : 'unknown',
+              endNodeId: value.endNodeIdentity ? value.endNodeIdentity.toString() : 'unknown'
             };
           } 
           // Handle Neo4j paths
-          else if (value && value.constructor.name === 'Path') {
+          else if (value && value.constructor && value.constructor.name === 'Path') {
             processedRecord[key] = {
               segments: value.segments.map(segment => ({
-                start: {
+                start: segment.start ? {
                   ...segment.start.properties,
-                  id: segment.start.identity.toString(),
-                  labels: segment.start.labels
-                },
-                relationship: {
+                  id: segment.start.identity ? segment.start.identity.toString() : `node-${Math.random().toString(36).substring(2)}`,
+                  labels: segment.start.labels || []
+                } : { id: `node-${Math.random().toString(36).substring(2)}`, labels: [] },
+                relationship: segment.relationship ? {
                   ...segment.relationship.properties,
-                  id: segment.relationship.identity.toString(),
-                  type: segment.relationship.type,
-                  startNodeId: segment.relationship.startNodeIdentity.toString(),
-                  endNodeId: segment.relationship.endNodeIdentity.toString()
-                },
-                end: {
+                  id: segment.relationship.identity ? segment.relationship.identity.toString() : `rel-${Math.random().toString(36).substring(2)}`,
+                  type: segment.relationship.type || 'UNKNOWN',
+                  startNodeId: segment.relationship.startNodeIdentity ? segment.relationship.startNodeIdentity.toString() : 'unknown',
+                  endNodeId: segment.relationship.endNodeIdentity ? segment.relationship.endNodeIdentity.toString() : 'unknown'
+                } : { id: `rel-${Math.random().toString(36).substring(2)}`, type: 'UNKNOWN', startNodeId: 'unknown', endNodeId: 'unknown' },
+                end: segment.end ? {
                   ...segment.end.properties,
-                  id: segment.end.identity.toString(),
-                  labels: segment.end.labels
-                }
+                  id: segment.end.identity ? segment.end.identity.toString() : `node-${Math.random().toString(36).substring(2)}`,
+                  labels: segment.end.labels || []
+                } : { id: `node-${Math.random().toString(36).substring(2)}`, labels: [] }
               }))
             };
           } 
           // Handle arrays of Neo4j objects
           else if (Array.isArray(value)) {
             processedRecord[key] = value.map(item => {
-              if (item && item.constructor.name === 'Node') {
-                return {
-                  ...item.properties,
-                  id: item.identity.toString(),
-                  labels: item.labels
-                };
-              } else if (item && item.constructor.name === 'Relationship') {
-                return {
-                  ...item.properties,
-                  id: item.identity.toString(),
-                  type: item.type,
-                  startNodeId: item.startNodeIdentity.toString(),
-                  endNodeId: item.endNodeIdentity.toString()
-                };
+              if (item && item.constructor) {
+                if (item.constructor.name === 'Node') {
+                  return {
+                    ...item.properties,
+                    id: item.identity ? item.identity.toString() : `node-${Math.random().toString(36).substring(2)}`,
+                    labels: item.labels || []
+                  };
+                } else if (item.constructor.name === 'Relationship') {
+                  return {
+                    ...item.properties,
+                    id: item.identity ? item.identity.toString() : `rel-${Math.random().toString(36).substring(2)}`,
+                    type: item.type || 'UNKNOWN',
+                    startNodeId: item.startNodeIdentity ? item.startNodeIdentity.toString() : 'unknown',
+                    endNodeId: item.endNodeIdentity ? item.endNodeIdentity.toString() : 'unknown'
+                  };
+                }
               }
               return item;
             });
