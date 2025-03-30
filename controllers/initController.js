@@ -48,11 +48,17 @@ const getDatabaseStatus = async (req, res, next) => {
     // Count nodes and relationships
     const countResult = await neo4jService.executeQuery(`
       MATCH (n)
+      WITH count(n) AS nodeCount
+      MATCH ()-[r]->()
+      WITH nodeCount, count(r) AS relationshipCount
+      MATCH (u:User)
+      WITH nodeCount, relationshipCount, count(u) AS userCount
+      MATCH (s:Story)
       RETURN 
-        count(n) AS nodeCount,
-        count(()-[]-()) AS relationshipCount,
-        count(:User) AS userCount,
-        count(:Story) AS storyCount
+        nodeCount,
+        relationshipCount,
+        userCount,
+        count(s) AS storyCount
     `, {}, true);
     
     res.json({
