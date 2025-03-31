@@ -140,6 +140,9 @@ const gracefulShutdown = async () => {
   }
 };
 
+// Trust proxy (required for platforms like Render that use reverse proxies)
+app.set('trust proxy', 1);
+
 // Listen for termination signals
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
